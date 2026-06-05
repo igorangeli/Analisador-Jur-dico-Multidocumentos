@@ -2,9 +2,9 @@ import streamlit as st
 import json
 import google.generativeai as genai
 
-st.set_page_config(page_title="Analisador Jurídico v1.0", layout="wide")
+st.set_page_config(page_title="Analisador Jurídico v1.1", layout="wide")
 
-# PROMPT RIGIDAMENTE CONFIGURADO PARA LEITURA INTEGRAL
+# PROMPT MODIFICADO PARA INCLUIR AS NOVAS PERGUNTAS
 PROMPT_BASE = """
 Você é um analista jurídico especializado e extremamente meticuloso.
 Analise o PDF enviado na íntegra e preencha o relatório solicitado.
@@ -28,12 +28,16 @@ Retorne SOMENTE JSON válido, sem markdown e sem caixas de código:
   "forma_garantia":"",
   "valor_garantia":"[Identifique o valor total garantido. Se for apólice, cite o valor total atualizado]",
   "valor_primeira_apolice":"[Busque no histórico e isole estritamente o valor da 1ª apólice apresentada. Não repita o valor atual se ele mudou nas renovações]",
-  "alvaras":"",
+  "rejeicao_apolice_garantia":"[Responda estritamente com SIM ou NÃO se há decisão rejeitando expressamente a apólice de seguro garantia]",
+  "folha_rejeicao_apolice":"[Se a resposta anterior for SIM, indique estritamente o número da folha/página onde está essa decisão. Se for NÃO, preencha com N/A]",
+  "data_sentenca_conhecimento":"[Indique a data em que foi proferida a sentença do processo de conhecimento]",
+  "alvaras":"[Indique as informações sobre alvarás e informe obrigatoriamente a FOLHA/PÁGINA em que o alvará se encontra]",
   "materia_impugnada":""
 }}
 
 REGRAS ADICIONAIS:
 * Seja rígido na linha do tempo das apólices: olhe as datas dos documentos para garantir que o "valor_primeira_apolice" refira-se ao documento mais antigo de garantia.
+* Seja extremamente preciso ao indicar os números das folhas das decisões e dos alvarás.
 """
 
 def exibir_campos_processo(dados, sufixo_chave):
@@ -47,6 +51,7 @@ def exibir_campos_processo(dados, sufixo_chave):
         st.text_area("Câmara Preventa", value=str(dados.get("camara_preventa", "")), height=100, key=f"camara_{sufixo_chave}")
         st.text_area("Relator Prevento", value=str(dados.get("relator_prevento", "")), height=100, key=f"relator_{sufixo_chave}")
         st.text_area("Autores", value=str(dados.get("autores", "")), height=100, key=f"autores_{sufixo_chave}")
+        st.text_area("Data da Sentença (Conhecimento)", value=str(dados.get("data_sentenca_conhecimento", "")), height=100, key=f"dt_sentenca_{sufixo_chave}")
 
     with col2:
         st.markdown("### 💰 Informações Financeiras e de Mérito")
@@ -55,10 +60,15 @@ def exibir_campos_processo(dados, sufixo_chave):
         st.text_area("Forma de Garantia", value=str(dados.get("forma_garantia", "")), height=100, key=f"forma_{sufixo_chave}")
         st.text_area("Valor da Garantia", value=str(dados.get("valor_garantia", "")), height=100, key=f"val_gar_{sufixo_chave}")
         st.text_area("Valor da Primeira Apólice", value=str(dados.get("valor_primeira_apolice", "")), height=100, key=f"val_apol_{sufixo_chave}")
-        st.text_area("Alvarás", value=str(dados.get("alvaras", "")), height=100, key=f"alvaras_{sufixo_chave}")
+        
+        # Novos campos de rejeição da apólice colocados juntos para melhor visualização
+        st.text_area("Decisão Rejeita Apólice?", value=str(dados.get("rejeicao_apolice_garantia", "")), height=70, key=f"rej_apol_{sufixo_chave}")
+        st.text_area("Folha da Rejeição da Apólice", value=str(dados.get("folha_rejeicao_apolice", "")), height=70, key=f"fl_rej_{sufixo_chave}")
+        
+        st.text_area("Alvarás (e Folhas)", value=str(dados.get("alvaras", "")), height=100, key=f"alvaras_{sufixo_chave}")
         st.text_area("Matéria Impugnada", value=str(dados.get("materia_impugnada", "")), height=100, key=f"materia_{sufixo_chave}")
 
-st.title("📄 Analisador Jurídico Multidocumentos")
+st.title("📄 Analisa de Documento SFH - RAMO 66")
 
 api_key = st.text_input("Chave Gemini", type="password")
 
@@ -110,17 +120,14 @@ if botao_analisar:
         status_texto.info(f"Analisando PDF completo {idx+1} de {len(arquivos)}: {arq.name}")
         
         try:
-            # Certifica que a leitura começa do início do arquivo e extrai os bytes puros
             arq.seek(0)
             pdf_bytes = arq.read()
             
-            # Monta o payload binário estruturado que o Gemini exige para PDFs nativos
             documento_pdf = {
                 "mime_type": "application/pdf",
                 "data": pdf_bytes
             }
             
-            # Envia o prompt e o arquivo binário diretamente para o modelo
             resposta = model.generate_content(
                 [PROMPT_BASE, documento_pdf],
                 generation_config={"temperature": 0, "response_mime_type": "application/json"}
