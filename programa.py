@@ -1,14 +1,13 @@
 import streamlit as st
-import fitz
 import json
 import google.generativeai as genai
 
 st.set_page_config(page_title="Analisador Jurídico", layout="wide")
 
-# PROMPT OTIMIZADO PARA ISOLAR OS VALORES FINANCEIROS DE FORMA RÍGIDA
+# PROMPT RIGIDAMENTE CONFIGURADO PARA LEITURA INTEGRAL
 PROMPT_BASE = """
 Você é um analista jurídico especializado e extremamente meticuloso.
-Analise os dados extraídos do PDF enviado e preencha o relatório solicitado.
+Analise o PDF enviado na íntegra e preencha o relatório solicitado.
 
 CRITÉRIOS DE DISTINÇÃO CRÍTICOS (NÃO CONFUNDA OS CAMPOS):
 1. valor_garantia: É o valor TOTAL e atual da garantia do juízo (seja por depósito judicial, penhora ou o somatório de seguros).
@@ -37,32 +36,6 @@ REGRAS ADICIONAIS:
 * Seja rígido na linha do tempo das apólices: olhe as datas dos documentos para garantir que o "valor_primeira_apolice" refira-se ao documento mais antigo de garantia.
 """
 
-PALAVRAS_CHAVE = [
-    "cumprimento", "sentença", "cumprimento de sentença", "apólice",
-    "seguro garantia", "depósito judicial", "manifestação", "caixa econômica",
-    "caixa", "impugnação", "impugnada", "alvará", "levantamento",
-    "garantia", "autor", "relator", "juiz"
-]
-
-def extrair_pdf_otimizado(pdf_file):
-    texto = ""
-    pdf_bytes = pdf_file.read()
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-
-    for i, pagina in enumerate(doc):
-        conteudo_pagina = pagina.get_text()
-        if not conteudo_pagina:
-            continue
-            
-        texto_lower = conteudo_pagina.lower()
-
-        if i < 3 or any(p in texto_lower for p in PALAVRAS_CHAVE):
-            texto += f"\n\n=== PÁGINA {i+1} ===\n"
-            texto += conteudo_pagina
-
-    doc.close()
-    return texto
-
 def exibir_campos_processo(dados, sufixo_chave):
     col1, col2 = st.columns(2)
 
@@ -85,18 +58,16 @@ def exibir_campos_processo(dados, sufixo_chave):
         st.text_area("Alvarás", value=str(dados.get("alvaras", "")), height=100, key=f"alvaras_{sufixo_chave}")
         st.text_area("Matéria Impugnada", value=str(dados.get("materia_impugnada", "")), height=100, key=f"materia_{sufixo_chave}")
 
-st.title("📄 Analisador Jurídico Multidocumentos")
+st.title("📄 Analisador Jurídico Multidocumentos (Leitura Direta)")
 
 api_key = st.text_input("Chave Gemini", type="password")
 
-# Inicialização de variáveis de controle de estado
 if "resultados_analise" not in st.session_state:
     st.session_state.resultados_analise = {}
 
 if "id_uploader" not in st.session_state:
     st.session_state.id_uploader = 0
 
-# Mecanismo de chave dinâmica para limpar a seleção de PDFs quando necessário
 arquivos = st.file_uploader(
     "Selecione os PDFs dos Processos",
     type=["pdf"],
@@ -112,13 +83,11 @@ with btn_col1:
 with btn_col2:
     botao_limpar = st.button("🧹 Limpar Tudo")
 
-# LÓGICA DE LIMPEZA COMPLETA (ZERA RESULTADOS E LIMPA O SELETOR DE ARQUIVOS)
 if botao_limpar:
     st.session_state.resultados_analise = {}
     st.session_state.id_uploader += 1
     st.rerun()
 
-# LÓGICA DA ANÁLISE DOS DOCUMENTOS
 if botao_analisar:
 
     if not api_key:
@@ -138,17 +107,22 @@ if botao_analisar:
     status_texto = st.empty()
     
     for idx, arq in enumerate(arquivos):
-        status_texto.info(f"Processando arquivo {idx+1} de {len(arquivos)}: {arq.name}")
+        status_texto.info(f"Analisando PDF completo {idx+1} de {len(arquivos)}: {arq.name}")
         
-        texto_processo = extrair_pdf_otimizado(arq)
-        
-        if not texto_processo.strip():
-            st.session_state.resultados_analise[arq.name] = {"erro": "Nenhum texto relevante encontrado."}
-            continue
-            
         try:
+            # Certifica que a leitura começa do início do arquivo e extrai os bytes puros
+            arq.seek(0)
+            pdf_bytes = arq.read()
+            
+            # Monta o payload binário estruturado que o Gemini exige para PDFs nativos
+            documento_pdf = {
+                "mime_type": "application/pdf",
+                "data": pdf_bytes
+            }
+            
+            # Envia o prompt e o arquivo binário diretamente para o modelo
             resposta = model.generate_content(
-                [PROMPT_BASE, texto_processo],
+                [PROMPT_BASE, documento_pdf],
                 generation_config={"temperature": 0, "response_mime_type": "application/json"}
             )
             
@@ -157,13 +131,12 @@ if botao_analisar:
             st.session_state.resultados_analise[arq.name] = dados_json
             
         except Exception as e:
-            st.session_state.resultados_analise[arq.name] = {"erro": f"Erro na análise: {str(e)}"}
+            st.session_state.resultados_analise[arq.name] = {"erro": f"Erro no processamento direto do PDF: {str(e)}"}
             
         progresso.progress((idx + 1) / len(arquivos))
         
     status_texto.success("Todos os processos foram analisados com sucesso!")
 
-# APRESENTAÇÃO DOS RESULTADOS NAS ABAS
 if st.session_state.resultados_analise:
     st.write("---")
     st.subheader("📌 Resultados da Análise por Arquivo")
