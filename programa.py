@@ -58,7 +58,7 @@ def exibir_campos_processo(dados, sufixo_chave):
         st.text_area("Alvarás", value=str(dados.get("alvaras", "")), height=100, key=f"alvaras_{sufixo_chave}")
         st.text_area("Matéria Impugnada", value=str(dados.get("materia_impugnada", "")), height=100, key=f"materia_{sufixo_chave}")
 
-st.title("📄 Analisador Jurídico Multidocumentos (Leitura Direta)")
+st.title("📄 Analisador Jurídico Multidocumentos (PDF COMPLETO)")
 
 api_key = st.text_input("Chave Gemini", type="password")
 
